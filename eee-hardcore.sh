@@ -83,6 +83,7 @@ on load:
     delete {hardcore::voting::*}
     
     # Global Lobby Setup
+    execute console command "mv create lobby NORMAL"
     execute console command "mv load lobby"
     wait 2 seconds
     execute console command "mv modify lobby set difficulty PEACEFUL"
