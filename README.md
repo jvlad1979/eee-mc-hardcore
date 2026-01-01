@@ -1,6 +1,6 @@
-# Group Hardcore Survival Server
+# EEE Hardcore Survival System
 
-A production-ready Minecraft Hardcore system for Paper 1.21.1+, featuring group-based world isolation, shared health, and consensus voting.
+A production-ready Minecraft Hardcore system for Paper 1.21.1+, featuring group-based world isolation, native shared health, and consensus voting.
 
 ## 🚀 One-Click Setup
 
@@ -10,10 +10,11 @@ To deploy this server, follow these steps:
 - **Docker & Docker Compose**
 - **Memory**: At least 4GB RAM allocated to the container.
 - **Plugins**:
-  - `Skript` (Core logic)
+  - `Skript` (Core logic engine)
   - `Multiverse-Core` (World management)
-  - `Multiverse-Inventories` (State isolation)
-  - `HealthSync` (Group health sharing)
+  - `Multiverse-Inventories` (State & inventory isolation)
+  > [!NOTE]
+  > No external health sync plugins are required. The system features a custom, high-performance native sync engine.
 
 ### 2. Deployment
 1. Copy the `compose.yaml` to your server directory.
@@ -46,17 +47,17 @@ Teams must vote to start their survival adventure.
 - All online team members must `/ready` for the run to begin.
 
 ### Mechanics
-- **Shared Health**: If one member takes damage, the entire team feels it. If one dies, everyone dies.
+- **Native Health Sync**: Every heart, half-heart, and hunger point is shared instantly within the group.
+- **Detailed Damage Blame**: Whenever someone takes damage, the whole server is notified: `[EEE Hardcore] Player took X hearts of damage!`.
 - **Private Worlds**: Each team plays in their own isolated world (`survival_g_<name>`).
-- **Death**: Upon death, the team's run ends, the world is deleted, and everyone is sent back to the lobby to try again.
+- **Team Death**: If one person dies, the whole team is eliminated. The survival world is deleted, and everyone is sent back to the lobby.
 
-## 🛠 Admin Commands
-- `/group purge`: **Factory Reset**. Wipes all teams, deletes all run worlds, and cleans the UI.
-- `/group sync`: Forces a UI refresh for everyone.
-- `/group removebar <id>`: Manually delete a ghost bossbar (see `/bossbar list`).
-- `/group removeworld <name>`: Manually delete a world.
+## 🛠 Admin & Diagnostic Commands
+- `/group purge`: **Nuclear Reset**. Wipes all teams, deletes all run worlds, and cleans the UI.
+- `/group healthsync`: Forces all grouped players to align their stats to their group leader.
+- `/group debug_vars`: Broadcasts the internal state of all group variables for auditing.
 
 ## 📁 Project Structure
-- `data/plugins/Skript/scripts/hardcore.sk`: Main logic engine.
-- `data/plugins/HealthSync/config.yml`: Health sharing configuration.
+- `data/plugins/Skript/scripts/hardcore.sk`: Main EEE Hardcore engine.
 - `compose.yaml`: Docker orchestration.
+- `README.md`: System documentation.
