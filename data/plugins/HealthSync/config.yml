@@ -1,0 +1,8 @@
+# Health-Sync Configuration
+# This plugin allows syncing health and hunger.
+sync-health: true
+sync-hunger: true
+max-linked-players: 100
+auto-link-new-players: false
+group-death-sync: false
+persistent-groups: false
