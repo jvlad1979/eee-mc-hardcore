@@ -16,17 +16,19 @@ To deploy this server, follow these steps:
   > [!NOTE]
   > No external health sync plugins are required. The system features a custom, high-performance native sync engine.
 
-### 2. Deployment
-1. Copy the `compose.yaml` to your server directory.
-2. Run the server:
+### 2. One-Line Deployment
+1. Run the universal installer:
    ```bash
-   docker compose up -d
+   bash ./eee-hardcore.sh
    ```
-3. Once the server is running, access the console:
+   *This will automatically install dependencies, create folders, and generate configurations.*
+
+2. Once the server is running, access the console:
    ```bash
    docker exec -it mc-server-mc-1 rcon-cli
    ```
-4. Run the initialization commands:
+
+3. Run the initialization commands inside the console:
    ```bash
    mv load lobby
    sk reload hardcore

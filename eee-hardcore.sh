@@ -1,0 +1,504 @@
+#!/bin/bash
+# EEE Hardcore Universal Installer v5.0
+# Supports: Ubuntu, Arch, Fedora, OpenSUSE
+
+set -e
+
+echo "🏹 Starting EEE Hardcore Installation..."
+
+# 1. Distro Detection & Dependency Installation
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS=$ID
+else
+    echo "❌ Could not detect OS. Please install Docker manually."
+    exit 1
+fi
+
+install_deps() {
+    case $OS in
+        ubuntu|debian)
+            echo "📦 Detected Ubuntu/Debian. Using apt..."
+            sudo apt-get update
+            sudo apt-get install -y curl docker.io docker-buildx docker-compose-v2
+            ;;
+        arch)
+            echo "📦 Detected Arch Linux. Using pacman..."
+            sudo pacman -Syu --noconfirm curl docker docker-compose
+            ;;
+        fedora)
+            echo "📦 Detected Fedora. Using dnf..."
+            sudo dnf install -y curl docker-ce docker-compose-plugin
+            ;;
+        opensuse*|suse)
+            echo "📦 Detected OpenSUSE. Using zypper..."
+            sudo zypper install -y curl docker docker-compose
+            ;;
+        *)
+            echo "⚠️  OS $OS not explicitly supported for auto-install, but we'll try..."
+            ;;
+    esac
+}
+
+install_deps
+
+# Ensure Docker is running
+sudo systemctl enable --now docker || true
+sudo usermod -aG docker $USER || true
+
+# 2. Folder Structure
+echo "📂 Creating directory structure..."
+mkdir -p data/plugins/Skript/scripts
+
+# 3. Generate Files
+echo "📝 Generating EEE Hardcore configuration..."
+
+# compose.yaml
+cat << 'EOF' > compose.yaml
+services:
+  mc:
+    image: itzg/minecraft-server:latest
+    pull_policy: daily
+    tty: true
+    stdin_open: true
+    ports:
+      - "25565:25565"
+    environment:
+      EULA: "TRUE"
+      TYPE: "PAPER"
+      VERSION: "1.21.11"
+      PLUGINS: "https://cdn.modrinth.com/data/3wmN97b8/versions/fw2C2Wui/multiverse-core-5.4.0.jar,https://cdn.modrinth.com/data/qvdtDX3s/versions/YgwE3Cbi/multiverse-inventories-5.3.0.jar,https://cdn.modrinth.com/data/xFNYAvMk/versions/oLyH9Mpt/Skript-2.13.2.jar"
+      SPAWN_PROTECTION: "0"
+    volumes:
+      - ./data:/data
+EOF
+
+# hardcore.sk
+cat << 'EOF' > data/plugins/Skript/scripts/hardcore.sk
+# EEE Hardcore Release v4.6
+# Native Health Sync + Damage Blame + Silent UI
+
+on load:
+    set {hardcore::preparing} to false
+    delete {hardcore::voting::*}
+    
+    # Global Lobby Setup
+    execute console command "mv load lobby"
+    wait 2 seconds
+    execute console command "mv modify lobby set difficulty PEACEFUL"
+    execute console command "mv modify lobby set pvp false"
+    
+    # Baseline Bossbar (Console only)
+    execute console command "bossbar add hardcore_ungrouped ""&7No Group"""
+    
+    broadcast "&d&l[EEE Hardcore] &fStarting isolated instance..."
+
+# --- Helper Functions ---
+
+function getSafeID(t: text) :: text:
+    set {_id} to lowercase {_t}
+    replace all " " with "_" in {_id}
+    return {_id}
+
+function syncHealth(g: text):
+    set {_leader_u} to {hardcore::group_members::%{_g}%::1}
+    set {_leader} to ({_leader_u} parsed as player)
+    
+    if {_leader} is online:
+        set {_h} to health of {_leader}
+        set {_f} to food level of {_leader}
+        
+        loop {hardcore::group_members::%{_g}%::*}:
+            set {_p} to (loop-value parsed as player)
+            if {_p} is online:
+                if {_p} is not {_leader}:
+                    set health of {_p} to {_h}
+                    set food level of {_p} to {_f}
+
+function sync_stats(p: player):
+    set {_u} to uuid of {_p}
+    set {_g} to {hardcore::player_group::%{_u}%}
+    
+    # CRITICAL: If no group, do NOT sync to anyone
+    if {_g} is not set:
+        stop
+        
+    set {_h} to health of {_p}
+    set {_f} to food level of {_p}
+    
+    loop {hardcore::group_members::%{_g}%::*}:
+        set {_m_u} to loop-value
+        set {_m} to ({_m_u} parsed as player)
+        
+        if {_m} is online:
+            if {_m} is not {_p}:
+                if {hardcore::syncing::%uuid of {_m}%} is not set:
+                    set {hardcore::syncing::%uuid of {_m}%} to true
+                    set health of {_m} to {_h}
+                    set food level of {_m} to {_f}
+                    delete {hardcore::syncing::%uuid of {_m}%}
+
+# --- CENTRAL UI & TIMER LOOP ---
+
+every 1 second:
+    # 1. Clear categorization
+    delete {_bar_members::*}
+    
+    # 2. Categorize all online players
+    loop all players:
+        set {_u} to uuid of loop-player
+        set {_g} to {hardcore::player_group::%{_u}%}
+        
+        if {_g} is set:
+            set {_safe} to getSafeID({_g})
+            set {_bar_id} to "hardcore_%{_safe}%"
+        else:
+            set {_bar_id} to "hardcore_ungrouped"
+        
+        # Add to local builder list (space-separated for console commands)
+        if {_bar_members::%{_bar_id}%} is not set:
+            set {_bar_members::%{_bar_id}%} to "%loop-player%"
+        else:
+            set {_bar_members::%{_bar_id}%} to "%{_bar_members::%{_bar_id}%}% %loop-player%"
+        
+        # Actionbar individual logic
+        if {_g} is set:
+            set {_s} to {hardcore::group_seconds::%{_g}%}
+            set {_h} to floor({_s} / 3600)
+            set {_m} to floor((mod({_s}, 3600)) / 60)
+            set {_sec} to mod({_s}, 60)
+            
+            set {_world_id} to getSafeID({_g})
+            if {hardcore::preparing::%{_g}%} is true:
+                send action bar "&e&lPreparing next world..." to loop-player
+            else if (name of world of loop-player) is ("survival_g_%{_world_id}%"):
+                send action bar "&fRun Time: &a%{_h}%h %{_m}%m %{_sec}%s" to loop-player
+            else:
+                send action bar "&7Waiting in lobby..." to loop-player
+        else:
+            send action bar "&7Status: &6Ungrouped" to loop-player
+
+    # 3. Apply memberships to Bossbars
+    # Ungrouped
+    set {_list} to {_bar_members::hardcore_ungrouped} ? ""
+    if {hardcore::cache::bossbar_players::hardcore_ungrouped} is not {_list}:
+        set {hardcore::cache::bossbar_players::hardcore_ungrouped} to {_list}
+        execute console command "bossbar set minecraft:hardcore_ungrouped players %{_list}%"
+    
+    # Groups
+    loop {hardcore::active_groups::*}:
+        set {_g} to loop-value
+        set {_safe} to getSafeID({_g})
+        set {_bar_id} to "hardcore_%{_safe}%"
+        
+        # Membership Sync
+        set {_list} to {_bar_members::%{_bar_id}%} ? ""
+        if {hardcore::cache::bossbar_players::%{_bar_id}%} is not {_list}:
+            set {hardcore::cache::bossbar_players::%{_bar_id}%} to {_list}
+            execute console command "bossbar set minecraft:%{_bar_id}% players %{_list}%"
+        
+        # Timer Increment logic
+        set {_any_in_world} to false
+        set {_world} to "survival_g_%{_safe}%"
+        loop {hardcore::group_members::%{_g}%::*}:
+            set {_p} to (loop-value-2 parsed as player)
+            if (name of world of {_p}) is {_world}:
+                set {_any_in_world} to true
+                stop loop
+        
+        if {_any_in_world} is true:
+            if {hardcore::preparing::%{_g}%} is false:
+                add 1 to {hardcore::group_seconds::%{_g}%}
+        
+        # Title Sync
+        set {_att} to {hardcore::group_attempts::%{_g}%} ? 0
+        if {_att} is 0:
+            set {_title} to "&7Group: &e%{_g}% &f| &7Staging..."
+        else:
+            set {_title} to "&6&lAttempt %{_att}% &f(%{_g}%)"
+            
+        if {hardcore::cache::bossbar_title::%{_bar_id}%} is not {_title}:
+            set {hardcore::cache::bossbar_title::%{_bar_id}%} to {_title}
+            execute console command "bossbar set minecraft:%{_bar_id}% name ""%{_title}%"""
+
+# --- Group Management ---
+
+command /group [<text>] [<text>]:
+    aliases: /hardcore, /hc
+    trigger:
+        if arg-1 is "create":
+            set {_u} to uuid of player
+            if {hardcore::player_group::%{_u}%} is set:
+                send "&cAlready in a group!" to player
+                stop
+            if arg-2 is not set:
+                send "&cUsage: /group create <name>" to player
+                stop
+            
+            set {hardcore::player_group::%{_u}%} to arg-2
+            if {hardcore::active_groups::*} does not contain arg-2:
+                add arg-2 to {hardcore::active_groups::*}
+            add {_u} to {hardcore::group_members::%arg-2%::*}
+            set {hardcore::group_attempts::%arg-2%} to 0
+            set {hardcore::group_seconds::%arg-2%} to 0
+            
+            # HealthSync - Alignment
+            syncHealth(arg-2)
+            
+            # Create Bossbar (Sanitized ID)
+            set {_safe} to getSafeID(arg-2)
+            execute console command "bossbar add hardcore_%{_safe}% ""&eCreating Group..."""
+            execute console command "bossbar set hardcore_%{_safe}% color yellow"
+            
+            send "&aGroup &e%arg-2% &acreated!" to player
+
+        else if arg-1 is "join":
+            set {_u} to uuid of player
+            if {hardcore::player_group::%{_u}%} is set:
+                send "&cLeave your group first!" to player
+                stop
+            if {hardcore::group_members::%arg-2%::*} is not set:
+                send "&cGroup doesn't exist." to player
+                stop
+            
+            set {hardcore::player_group::%{_u}%} to arg-2
+            add {_u} to {hardcore::group_members::%arg-2%::*}
+            
+            # HealthSync
+            syncHealth(arg-2)
+            
+            send "&aJoined %arg-2%!" to player
+
+        else if arg-1 is "leave":
+            set {_u} to uuid of player
+            set {_g} to {hardcore::player_group::%{_u}%}
+            if {_g} is not set:
+                send "&cNo group." to player
+                stop
+            
+            remove {_u} from {hardcore::group_members::%{_g}%::*}
+            delete {hardcore::player_group::%{_u}%}
+            
+            # HealthSync
+            syncHealth({_g})
+            
+            if size of {hardcore::group_members::%{_g}%::*} is 0:
+                remove {_g} from {hardcore::active_groups::*}
+                set {_safe} to getSafeID({_g})
+                execute console command "bossbar remove hardcore_%{_safe}%"
+                delete {hardcore::group_members::%{_g}%::*}
+            
+            teleport player to spawn of world "lobby"
+            send "&eLeft group." to player
+
+        else if arg-1 is "purge":
+            if player is not op:
+                send "&cAdmin command only." to player
+                stop
+            broadcast "&c&l[Admin] &fNUCLEAR RESET: Wiping all data and bars..."
+            
+            # 1. Kill everything we know about
+            loop {hardcore::active_groups::*}:
+                set {_safe} to getSafeID(loop-value)
+                execute console command "bossbar remove hardcore_%{_safe}%"
+            execute console command "bossbar remove hardcore_ungrouped"
+            
+            # 2. Kill legacy IDs and TEAMS via console
+            execute console command "bossbar remove hardcore_ungrouped"
+            execute console command "bossbar remove hardcore_attempts"
+            execute console command "bossbar remove survival"
+            execute console command "team remove hardcore_sync"
+            
+            # 3. Wipe Variables & Caches
+            delete {hardcore::*}
+            broadcast "&7- Variables and Caches wiped."
+            
+            # 4. Wait for memory cleanup
+            wait 1 second
+            
+            # 5. Re-init baseline
+            execute console command "bossbar add hardcore_ungrouped ""&7No Group"""
+            
+            loop all players:
+                teleport loop-player to spawn of world "lobby"
+                # Nuclear Clear for Purge (Internal)
+                heal loop-player
+                set food level of loop-player to 10
+            
+            send "&aSystem reset. Use /group create to start fresh." to player
+
+        else if arg-1 is "healthsync":
+            if player is not op:
+                send "&cAdmin command only." to player
+                stop
+            if arg-2 is set:
+                syncHealth(arg-2)
+                send "&aHealth links refreshed for group &e%arg-2%&a. Check broadcasts for debug logs." to player
+            else:
+                # Global Nuclear Sync
+                broadcast "&c[HealthSync] Global Nuclear Refresh start..."
+                loop all players:
+                    heal loop-player
+                    set food level of loop-player to 10
+                
+                wait 1 second
+                
+                loop {hardcore::active_groups::*}:
+                    syncHealth(loop-value)
+                send "&aAll health links refreshed. Check broadcasts for debug logs." to player
+
+        else if arg-1 is "debug_vars":
+            if player is not op:
+                stop
+            broadcast "&6--- Hardcore Variable Debug ---"
+            broadcast "&7Active Groups: &f%{hardcore::active_groups::*}%"
+            loop {hardcore::active_groups::*}:
+                broadcast "&7- Group &e%loop-value%&7 members: &f%{hardcore::group_members::%loop-value%::*}%"
+            broadcast "&7All Players:"
+            loop all players:
+                set {_u} to uuid of loop-player
+                broadcast "&7- &f%loop-player%&7: &e%{hardcore::player_group::%{_u}%}%"
+            send "&aCheck chat/logs for variable state." to player
+
+        else if arg-1 is "sync":
+            broadcast "&aUI state synchronized."
+            
+        else:
+            send "&6/group create <name>, join <name>, leave, purge, healthsync, debug_vars" to player
+
+# --- Voting & Reset ---
+
+command /ready:
+    trigger:
+        set {_u} to uuid of player
+        set {_g} to {hardcore::player_group::%{_u}%}
+        if {_g} is not set:
+            send "&cNeed a group!" to player
+            stop
+            
+        set {hardcore::votes::%{_g}%::%{_u}%} to true
+        
+        # Check consensus
+        set {_online} to 0
+        loop {hardcore::group_members::%{_g}%::*}:
+            if (loop-value parsed as player) is online:
+                add 1 to {_online}
+        
+        if (size of {hardcore::votes::%{_g}%::*}) >= {_online}:
+            delete {hardcore::votes::%{_g}%::*}
+            start_run({_g})
+        else:
+            set {_v} to size of {hardcore::votes::%{_g}%::*}
+            loop all players:
+                if {hardcore::player_group::%uuid of loop-player%} is {_g}:
+                    send "&eReady: %{_v}%/%{_online}%" to loop-player
+
+function start_run(g: text):
+    set {hardcore::preparing::%{_g}%} to true
+    set {_safe} to getSafeID({_g})
+    set {_world} to "survival_g_%{_safe}%"
+    
+    loop {hardcore::group_members::%{_g}%::*}:
+        set {_p} to (loop-value parsed as player)
+        if {_p} is online:
+            teleport {_p} to spawn of world "lobby"
+            heal {_p}
+            set food level of {_p} to 10
+            
+    execute console command "mv delete ""%{_world}%"""
+    execute console command "mv confirm"
+    wait 5 seconds
+    set {_seed} to random integer between 1 and 999999999
+    execute console command "mv create ""%{_world}%"" NORMAL -s %{_seed}%"
+    wait 10 seconds
+    execute console command "mv modify ""%{_world}%"" set difficulty HARD"
+    
+    # 4. Finalize & Warp
+    add 1 to {hardcore::group_attempts::%{_g}%}
+    set {hardcore::group_seconds::%{_g}%} to 0
+    
+    # Inventory isolation
+    execute console command "mvinv group create ""hardcore_%{_safe}%"" ""%{_world}%"",lobby"
+    
+    set {hardcore::preparing::%{_g}%} to false
+    wait 2 seconds
+    
+    loop {hardcore::group_members::%{_g}%::*}:
+        set {_p} to (loop-value parsed as player)
+        if {_p} is online:
+            teleport {_p} to spawn of world {_world}
+            # Multiverse fallback (quoted)
+            execute console command "mv tp %{_p}% ""%{_world}%"""
+    
+    broadcast "&d&l[EEE Hardcore] &fTeam &e%{_g}% &fstarted &6&lAttempt %{hardcore::group_attempts::%{_g}%}%&f!"
+
+# --- Events ---
+
+on death of player:
+    set {_g} to {hardcore::player_group::%uuid of victim%}
+    if {_g} is set:
+        loop {hardcore::group_members::%{_g}%::*}:
+            set {_p} to (loop-value parsed as player)
+            if {_p} is online:
+                if {_p} is not victim:
+                    kill {_p}
+        broadcast "&c&l[EEE Hardcore] &fTeam %{_g}% &chas perished!"
+
+on respawn:
+    wait 1 tick
+    teleport player to spawn of world "lobby"
+
+on join:
+    wait 1 second
+    # Loop handles everything
+
+on damage of player:
+    if name of world of victim is "lobby":
+        cancel event
+        stop
+        
+    set {_u} to uuid of victim
+    # Damage Blame
+    if {hardcore::player_group::%{_u}%} is set:
+        if {hardcore::syncing::%{_u}%} is not set:
+            set {_d} to (damage / 2)
+            broadcast "&c&l[EEE Hardcore] &f%victim% &ctook &e%{_d}% &chearts of damage!"
+        
+        # Avoid recursion
+        if {hardcore::syncing::%{_u}%} is not set:
+            set {hardcore::syncing::%{_u}%} to true
+            wait 1 tick
+            sync_stats(victim)
+            delete {hardcore::syncing::%{_u}%}
+
+on heal:
+    set {_u} to uuid of player
+    if {hardcore::player_group::%{_u}%} is set:
+        if {hardcore::syncing::%{_u}%} is not set:
+            set {hardcore::syncing::%{_u}%} to true
+            wait 1 tick
+            sync_stats(player)
+            delete {hardcore::syncing::%{_u}%}
+
+on food level change:
+    set {_u} to uuid of player
+    if {hardcore::player_group::%{_u}%} is set:
+        if {hardcore::syncing::%{_u}%} is not set:
+            set {hardcore::syncing::%{_u}%} to true
+            wait 1 tick
+            sync_stats(player)
+            delete {hardcore::syncing::%{_u}%}
+EOF
+
+# 4. Finalize
+echo "🚀 Everything is ready! Starting the server..."
+docker compose up -d
+
+echo "✅ EEE Hardcore Installation Complete!"
+echo "--------------------------------------------------"
+echo "To finish setup, run these commands in the server console:"
+echo "1. mv load lobby"
+echo "2. sk reload hardcore"
+echo "3. group purge"
+echo "--------------------------------------------------"
+echo "Enjoy EEE Hardcore!"
