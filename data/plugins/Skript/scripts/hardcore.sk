@@ -106,24 +106,32 @@ every 1 second:
         else:
             send action bar "&7Status: &6Ungrouped" to loop-player
 
-    # 3. Apply memberships to Bossbars
-    # Ungrouped
-    set {_list} to {_bar_members::hardcore_ungrouped} ? ""
-    if {hardcore::cache::bossbar_players::hardcore_ungrouped} is not {_list}:
-        set {hardcore::cache::bossbar_players::hardcore_ungrouped} to {_list}
-        execute console command "bossbar set minecraft:hardcore_ungrouped players %{_list}%"
+    # 3. Apply memberships to Bossbars using Tags
+    # First, clear ALL hardcore tags from everyone
+    loop all players:
+        execute console command "tag %loop-player% remove hc_ungrouped"
+        loop {hardcore::active_groups::*}:
+            set {_safe} to getSafeID(loop-value-2)
+            execute console command "tag %loop-player% remove hc_%{_safe}%"
     
-    # Groups
+    # Now assign the correct tag to each player
+    loop all players:
+        set {_u} to uuid of loop-player
+        set {_g} to {hardcore::player_group::%{_u}%}
+        if {_g} is set:
+            set {_safe} to getSafeID({_g})
+            execute console command "tag %loop-player% add hc_%{_safe}%"
+        else:
+            execute console command "tag %loop-player% add hc_ungrouped"
+    
+    # Apply to bossbars using @a[tag=...]
+    execute console command "bossbar set minecraft:hardcore_ungrouped players @a[tag=hc_ungrouped]"
+    
     loop {hardcore::active_groups::*}:
         set {_g} to loop-value
         set {_safe} to getSafeID({_g})
         set {_bar_id} to "hardcore_%{_safe}%"
-        
-        # Membership Sync
-        set {_list} to {_bar_members::%{_bar_id}%} ? ""
-        if {hardcore::cache::bossbar_players::%{_bar_id}%} is not {_list}:
-            set {hardcore::cache::bossbar_players::%{_bar_id}%} to {_list}
-            execute console command "bossbar set minecraft:%{_bar_id}% players %{_list}%"
+        execute console command "bossbar set minecraft:%{_bar_id}% players @a[tag=hc_%{_safe}%]"
         
         # Timer Increment logic (Check all 3 dimensions)
         set {_any_in_world} to false
