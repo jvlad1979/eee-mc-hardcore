@@ -92,9 +92,14 @@ every 1 second:
             set {_sec} to mod({_s}, 60)
             
             set {_world_id} to getSafeID({_g})
+            set {_w_ov} to "survival_g_%{_world_id}%"
+            set {_w_ne} to "survival_g_%{_world_id}%_nether"
+            set {_w_en} to "survival_g_%{_world_id}%_end"
+            set {_pw} to name of world of loop-player
+            
             if {hardcore::preparing::%{_g}%} is true:
                 send action bar "&e&lPreparing next world..." to loop-player
-            else if (name of world of loop-player) is ("survival_g_%{_world_id}%"):
+            else if {_pw} is {_w_ov} or {_w_ne} or {_w_en}:
                 send action bar "&fRun Time: &a%{_h}%h %{_m}%m %{_sec}%s" to loop-player
             else:
                 send action bar "&7Waiting in lobby..." to loop-player
