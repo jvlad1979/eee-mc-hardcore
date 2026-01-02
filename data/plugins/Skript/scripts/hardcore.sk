@@ -94,50 +94,67 @@ every 1 second:
             set {_world_id} to getSafeID({_g})
             set {_w_ov} to "survival_g_%{_world_id}%"
             set {_w_ne} to "survival_g_%{_world_id}%_nether"
-            set {_w_en} to "survival_g_%{_world_id}%_end"
+            set {_w_en} to "survival_g_%{_world_id}%_the_end"
             set {_pw} to name of world of loop-player
             
             if {hardcore::preparing::%{_g}%} is true:
                 send action bar "&e&lPreparing next world..." to loop-player
             else if {_pw} is {_w_ov} or {_w_ne} or {_w_en}:
-                send action bar "&fRun Time: &a%{_h}%h %{_m}%m %{_sec}%s" to loop-player
+                if {compass::current_dir::%{_u}%} is set:
+                    send action bar "&f&l[ &e%{compass::current_dir::%{_u}%}% &f&l]   &fRun Time: &a%{_h}%h %{_m}%m %{_sec}%s" to loop-player
+                else:
+                    send action bar "&fRun Time: &a%{_h}%h %{_m}%m %{_sec}%s" to loop-player
             else:
                 send action bar "&7Waiting in lobby..." to loop-player
         else:
             send action bar "&7Status: &6Ungrouped" to loop-player
 
-    # 3. Apply memberships to Bossbars using Tags
-    # First, clear ALL hardcore tags from everyone
-    loop all players:
-        execute console command "tag %loop-player% remove hc_ungrouped"
-        loop {hardcore::active_groups::*}:
-            set {_safe} to getSafeID(loop-value-2)
-            execute console command "tag %loop-player% remove hc_%{_safe}%"
-    
-    # Now assign the correct tag to each player
+    # 3. Apply memberships to Bossbars using Tags (CACHED - only update on change)
     loop all players:
         set {_u} to uuid of loop-player
         set {_g} to {hardcore::player_group::%{_u}%}
+        
+        # Determine what tag this player SHOULD have
         if {_g} is set:
             set {_safe} to getSafeID({_g})
-            execute console command "tag %loop-player% add hc_%{_safe}%"
+            set {_target_tag} to "hc_%{_safe}%"
         else:
-            execute console command "tag %loop-player% add hc_ungrouped"
+            set {_target_tag} to "hc_ungrouped"
+        
+        # Only update if different from cached
+        if {hardcore::cache::player_tag::%{_u}%} is not {_target_tag}:
+            # Remove old tag if exists
+            set {_old} to {hardcore::cache::player_tag::%{_u}%}
+            if {_old} is set:
+                execute console command "tag %loop-player% remove %{_old}%"
+            
+            # Add new tag
+            execute console command "tag %loop-player% add %{_target_tag}%"
+            set {hardcore::cache::player_tag::%{_u}%} to {_target_tag}
+            
+            # Mark that bossbars need refresh
+            set {_bossbar_dirty} to true
     
-    # Apply to bossbars using @a[tag=...]
-    execute console command "bossbar set minecraft:hardcore_ungrouped players @a[tag=hc_ungrouped]"
+    # Only refresh bossbars if something changed
+    if {_bossbar_dirty} is true:
+        execute console command "bossbar set minecraft:hardcore_ungrouped players @a[tag=hc_ungrouped]"
+        loop {hardcore::active_groups::*}:
+            set {_g} to loop-value
+            set {_safe} to getSafeID({_g})
+            set {_bar_id} to "hardcore_%{_safe}%"
+            execute console command "bossbar set minecraft:%{_bar_id}% players @a[tag=hc_%{_safe}%]"
     
+    # Timer and Title logic for each group
     loop {hardcore::active_groups::*}:
         set {_g} to loop-value
         set {_safe} to getSafeID({_g})
         set {_bar_id} to "hardcore_%{_safe}%"
-        execute console command "bossbar set minecraft:%{_bar_id}% players @a[tag=hc_%{_safe}%]"
         
         # Timer Increment logic (Check all 3 dimensions)
         set {_any_in_world} to false
         set {_w_ov} to "survival_g_%{_safe}%"
         set {_w_ne} to "survival_g_%{_safe}%_nether"
-        set {_w_en} to "survival_g_%{_safe}%_end"
+        set {_w_en} to "survival_g_%{_safe}%_the_end"
         
         loop all players:
             set {_pw} to name of world of loop-player
@@ -160,7 +177,7 @@ every 1 second:
         if {hardcore::cache::bossbar_title::%{_bar_id}%} is not {_title}:
             set {hardcore::cache::bossbar_title::%{_bar_id}%} to {_title}
             execute console command "bossbar set minecraft:%{_bar_id}% name ""%{_title}%"""
-
+    
 # --- Group Management ---
 
 command /group [<text>] [<text>]:
@@ -371,13 +388,13 @@ function start_run(g: text):
     execute console command "mv create ""%{_world}%_nether"" NETHER -s %{_seed}%"
     wait 2 seconds
     broadcast "&7- Creating End..."
-    execute console command "mv create ""%{_world}%_end"" THE_END -s %{_seed}%"
+    execute console command "mv create ""%{_world}%_the_end"" THE_END -s %{_seed}%"
     
     wait 10 seconds
     broadcast "&7- Setting difficulty..."
     execute console command "mv modify ""%{_world}%"" set difficulty HARD"
     execute console command "mv modify ""%{_world}%_nether"" set difficulty HARD"
-    execute console command "mv modify ""%{_world}%_end"" set difficulty HARD"
+    execute console command "mv modify ""%{_world}%_the_end"" set difficulty HARD"
     
     # 4. Finalize & Warp
     add 1 to {hardcore::group_attempts::%{_g}%}
@@ -385,7 +402,7 @@ function start_run(g: text):
     
     # Inventory isolation (Group all 3 together)
     broadcast "&7- Creating Inventory Group..."
-    execute console command "mvinv group create ""hardcore_%{_safe}%"" all ""%{_world}%,%{_world}%_nether,%{_world}%_end"""
+    execute console command "mvinv group create ""hardcore_%{_safe}%"" all ""%{_world}%,%{_world}%_nether,%{_world}%_the_end"""
     execute console command "mvinv reload"
     
     set {hardcore::preparing::%{_g}%} to false
@@ -461,3 +478,4 @@ on food level change:
 # NOTE: Nether/End portal logic is now fully handled by Multiverse-NetherPortals.
 # The naming convention (survival_g_%id%, survival_g_%id%_nether, survival_g_%id%_end)
 # ensures automatic linking. Install MVNP and restart the server for portals to work!
+
