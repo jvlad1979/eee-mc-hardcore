@@ -384,8 +384,9 @@ on damage of player:
     if {hardcore::player_group::%{_u}%} is set:
         # Damage Blame
         if {hardcore::syncing::%{_u}%} is not set:
-            set {_d} to (damage / 2)
-            broadcast "&c&l[EEE Hardcore] &f%victim% &ctook &e%{_d}% &chearts of damage!"
+            if final damage > 0:
+                set {_d} to (final damage / 2)
+                broadcast "&c&l[EEE Hardcore] &f%victim% &ctook &e%{_d}% &chearts of damage!"
         
         # Avoid recursion
         if {hardcore::syncing::%{_u}%} is not set:
