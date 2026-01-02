@@ -120,14 +120,18 @@ every 1 second:
             set {hardcore::cache::bossbar_players::%{_bar_id}%} to {_list}
             execute console command "bossbar set minecraft:%{_bar_id}% players %{_list}%"
         
-        # Timer Increment logic
+        # Timer Increment logic (Check all 3 dimensions)
         set {_any_in_world} to false
-        set {_world} to "survival_g_%{_safe}%"
-        loop {hardcore::group_members::%{_g}%::*}:
-            set {_p} to (loop-value-2 parsed as player)
-            if (name of world of {_p}) is {_world}:
-                set {_any_in_world} to true
-                stop loop
+        set {_w_ov} to "survival_g_%{_safe}%"
+        set {_w_ne} to "survival_g_%{_safe}%_nether"
+        set {_w_en} to "survival_g_%{_safe}%_end"
+        
+        loop all players:
+            set {_pw} to name of world of loop-player
+            if {_pw} is {_w_ov} or {_w_ne} or {_w_en}:
+                if {hardcore::player_group::%uuid of loop-player%} is {_g}:
+                    set {_any_in_world} to true
+                    stop loop
         
         if {_any_in_world} is true:
             if {hardcore::preparing::%{_g}%} is false:
@@ -224,6 +228,12 @@ command /group [<text>] [<text>]:
             loop {hardcore::active_groups::*}:
                 set {_safe} to getSafeID(loop-value)
                 execute console command "bossbar remove hardcore_%{_safe}%"
+                execute console command "mv delete ""survival_g_%{_safe}%"""
+                execute console command "mv confirm"
+                execute console command "mv delete ""survival_g_%{_safe}%_nether"""
+                execute console command "mv confirm"
+                execute console command "mv delete ""survival_g_%{_safe}%_end"""
+                execute console command "mv confirm"
             execute console command "bossbar remove hardcore_ungrouped"
             
             # 2. Kill legacy IDs and TEAMS via console
@@ -328,20 +338,42 @@ function start_run(g: text):
             heal {_p}
             set food level of {_p} to 10
             
+    broadcast "&d&l[EEE Hardcore] &fStarting run for group &e%{_g}%&f..."
+    
     execute console command "mv delete ""%{_world}%"""
     execute console command "mv confirm"
+    execute console command "mv delete ""%{_world}%_nether"""
+    execute console command "mv confirm"
+    execute console command "mv delete ""%{_world}%_end"""
+    execute console command "mv confirm"
+    
     wait 5 seconds
     set {_seed} to random integer between 1 and 999999999
+    
+    # Create all 3 dimensions
+    broadcast "&7- Creating Overworld..."
     execute console command "mv create ""%{_world}%"" NORMAL -s %{_seed}%"
+    wait 2 seconds
+    broadcast "&7- Creating Nether..."
+    execute console command "mv create ""%{_world}%_nether"" NETHER -s %{_seed}%"
+    wait 2 seconds
+    broadcast "&7- Creating End..."
+    execute console command "mv create ""%{_world}%_end"" THE_END -s %{_seed}%"
+    
     wait 10 seconds
+    broadcast "&7- Setting difficulty..."
     execute console command "mv modify ""%{_world}%"" set difficulty HARD"
+    execute console command "mv modify ""%{_world}%_nether"" set difficulty HARD"
+    execute console command "mv modify ""%{_world}%_end"" set difficulty HARD"
     
     # 4. Finalize & Warp
     add 1 to {hardcore::group_attempts::%{_g}%}
     set {hardcore::group_seconds::%{_g}%} to 0
     
-    # Inventory isolation
-    execute console command "mvinv group create ""hardcore_%{_safe}%"" ""%{_world}%"",lobby"
+    # Inventory isolation (Group all 3 together)
+    broadcast "&7- Creating Inventory Group..."
+    execute console command "mvinv group create ""hardcore_%{_safe}%"" all ""%{_world}%,%{_world}%_nether,%{_world}%_end"""
+    execute console command "mvinv reload"
     
     set {hardcore::preparing::%{_g}%} to false
     wait 2 seconds
@@ -412,3 +444,7 @@ on food level change:
             wait 1 tick
             sync_stats(player)
             delete {hardcore::syncing::%{_u}%}
+
+# NOTE: Nether/End portal logic is now fully handled by Multiverse-NetherPortals.
+# The naming convention (survival_g_%id%, survival_g_%id%_nether, survival_g_%id%_end)
+# ensures automatic linking. Install MVNP and restart the server for portals to work!
